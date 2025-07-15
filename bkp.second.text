@@ -1,0 +1,232 @@
+import 'dart:async';
+import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:http/http.dart' as http;
+
+void main() {
+  runApp(const MyApp());
+}
+
+class MyApp extends StatelessWidget {
+  const MyApp({Key? key}) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'PAKAR GPS',
+      theme: ThemeData(
+        colorScheme: ColorScheme.fromSwatch(primarySwatch: Colors.deepPurple),
+        // useMaterial3: true, // Material3 support is still in development
+      ),
+      home: const VehicleSelectionScreen(),
+    );
+  }
+}
+
+class VehicleSelectionScreen extends StatefulWidget {
+  const VehicleSelectionScreen({Key? key}) : super(key: key);
+
+  @override
+  State<VehicleSelectionScreen> createState() => _VehicleSelectionScreenState();
+}
+
+class _VehicleSelectionScreenState extends State<VehicleSelectionScreen> {
+  List<Map<String, dynamic>> _vehicles = [];
+  String? _selectedVehicleId;
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchVehicles();
+  }
+
+  // Simulate fetching vehicle data from an API
+  Future<void> _fetchVehicles() async {
+    // Fake vehicle data
+    List<Map<String, dynamic>> fakeData = [
+      {'id': '1', 'vehicle': 'Vehicle A'},
+      {'id': '2', 'vehicle': 'Vehicle B'},
+      {'id': '3', 'vehicle': 'Vehicle C'},
+      {'id': '4', 'vehicle': 'Vehicle D'},
+    ];
+
+    // Simulate network delay
+    await Future.delayed(Duration(seconds: 1));
+
+    setState(() {
+      _vehicles = fakeData;
+    });
+  }
+
+  void _onVehicleSelected(String? vehicleId) {
+    setState(() {
+      _selectedVehicleId = vehicleId;
+    });
+  }
+
+  void _navigateToGeolocationApp() {
+    if (_selectedVehicleId != null) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => GeolocationApp(selectedVehicleId: _selectedVehicleId!),
+        ),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Please select a vehicle first')),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Select Vehicle'),
+      ),
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            DropdownButton<String>(
+              hint: Text('Select Vehicle'),
+              value: _selectedVehicleId,
+              onChanged: _onVehicleSelected,
+              items: _vehicles.map<DropdownMenuItem<String>>((Map<String, dynamic> vehicle) {
+                return DropdownMenuItem<String>(
+                  value: vehicle['id'],
+                  child: Text(vehicle['vehicle']),
+                );
+              }).toList(),
+            ),
+            const SizedBox(height: 20),
+            ElevatedButton(
+              onPressed: _navigateToGeolocationApp,
+              child: const Text('Proceed'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class GeolocationApp extends StatefulWidget {
+  final String selectedVehicleId;
+
+  const GeolocationApp({required this.selectedVehicleId, Key? key}) : super(key: key);
+
+  @override
+  State<GeolocationApp> createState() => _GeolocationAppState();
+}
+
+class _GeolocationAppState extends State<GeolocationApp> {
+  String? _currentLocation;
+  Timer? _timer;
+
+  Future<void> _sendGeoLocation(String geolocation) async {
+    try {
+      final response = await http.post(
+        Uri.parse('https://livetrack.pakarit.sbs/creatego.php'),
+        body: {
+          'geolocation': geolocation,
+          'idvehicle': widget.selectedVehicleId,
+        },
+      );
+      if (response.statusCode == 200) {
+        print('Geolocation sent successfully');
+      } else {
+        print('Failed to send geolocation: ${response.statusCode}');
+      }
+    } catch (e) {
+      print('Error sending geolocation: $e');
+    }
+  }
+
+  Future<Position> _getCurrentLocation() async {
+    bool serviceEnabled;
+    LocationPermission permission;
+
+    serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    if (!serviceEnabled) {
+      throw 'Location services are disabled.';
+    }
+
+    permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+      if (permission == LocationPermission.denied) {
+        throw 'Location permissions are denied';
+      }
+    }
+
+    if (permission == LocationPermission.deniedForever) {
+      throw 'Location permissions are permanently denied, we cannot request permissions.';
+    }
+
+    return await Geolocator.getCurrentPosition();
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(Duration(seconds: 5), (Timer timer) {
+      _getCurrentLocation().then((Position position) {
+        setState(() {
+          _currentLocation = "${position.latitude}, ${position.longitude}";
+        });
+        _sendGeoLocation(_currentLocation!);
+      }).catchError((e) {
+        print('Error getting location: $e');
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Geolocation App'),
+      ),
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            const Text(
+              "Location coordinates",
+              style: TextStyle(
+                fontSize: 24,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(_currentLocation ?? "Coordinates"),
+            const SizedBox(height: 30),
+            ElevatedButton(
+              onPressed: () async {
+                try {
+                  Position position = await _getCurrentLocation();
+                  setState(() {
+                    _currentLocation = "${position.latitude}, ${position.longitude}";
+                  });
+                  _sendGeoLocation(_currentLocation!);
+                } catch (e) {
+                  print("Error getting location: $e");
+                }
+              },
+              child: const Text("Get Location"),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
